@@ -1,0 +1,66 @@
+### Backend API Testing Guide: URLs, Requests, and Expected Outputs
+
+Below is a comprehensive testing guide for all backend APIs. I've organized it by feature (User Management, Health Records, Alerts & AI). For each endpoint:
+
+- **Method & URL**: Full request details (use `http://localhost:8080` as base).
+- **Headers**: Common ones (add Basic Auth for protected endpoints: username `user`, password `password`—or disable in SecurityConfig for simplicity).
+- **Request Body**: JSON example (if applicable).
+- **Scenarios**: Success/error cases with expected status codes and response bodies (JSON snippets).
+
+Test in Postman, curl, or browser. Update `{{userId}}` (e.g., 1 after register), `{{recordId}}`, etc., dynamically. All responses are JSON unless noted (e.g., exports are files).
+
+#### Common Headers for All Requests
+- `Content-Type: application/json` (for POST/PUT).
+- For protected endpoints (e.g., /api/records/*): Add Basic Auth (or expect 401 Unauthorized).
+
+#### 1. User Management
+| Endpoint | Method & URL | Request Body | Expected Success (200 OK) | Expected Error Examples |
+|----------|--------------|--------------|---------------------------|-------------------------|
+| **Register User** | POST `/api/users/register` | `{"name": "John Doe", "email": "john@test.com", "password": "pass123"}` | `{"id": 1, "name": "John Doe", "email": "john@test.com"}` (UserDto; password hashed in DB) | 400 Bad Request: `{"email": "Email is required"}` (validation fail); 500: Duplicate email `"Email already exists"`. |
+| **Login User** | POST `/api/users/login` | `{"email": "john@test.com", "password": "pass123"}` (name optional) | `{"id": 1, "name": "John Doe", "email": "john@test.com"}` (UserDto) | 404 Not Found: `{"error": "User not found"}`; 500: `"Invalid credentials"`. |
+| **Get User Profile** | GET `/api/users/{{userId}}` | N/A | `{"id": 1, "name": "John Doe", "email": "john@test.com"}` | 404: `{"error": "User not found: 999"}`; 401 if unauthorized. |
+| **Update User Profile** | PUT `/api/users/{{userId}}` | `{"name": "Jane Doe", "password": "newpass456"}` (email optional) | `{"id": 1, "name": "Jane Doe", "email": "john@test.com"}` (updated) | 404: `{"error": "User not found: 999"}`; 400: `{"name": "Name is required"}`. |
+| **Forgot Password (Send OTP)** | POST `/api/users/forgot-password` | `{"email": "john@test.com"}` | `"OTP sent to email"` (check your email for 6-digit OTP) | 400: `{"email": "Invalid email"}`; 404: `{"error": "User not found"}`. |
+| **Reset Password** | POST `/api/users/reset-password` | `{"otp": "123456", "newPassword": "resetpass789"}` (add `"email": "john@test.com"` if DTO updated) | `"Password reset successful"` | 400: `{"error": "Invalid OTP"}`; 500: Generic internal error. |
+
+**Scenarios**:
+- **Success Flow**: Register → Login (get ID) → Update → Forgot (get OTP from email) → Reset → Login with new pass.
+- **Error Flow**: Register with existing email → 500 duplicate; Login with wrong pass → 500 invalid; Update non-existent user → 404.
+
+#### 2. Health Records
+| Endpoint | Method & URL | Request Body | Expected Success (200 OK) | Expected Error Examples |
+|----------|--------------|--------------|---------------------------|-------------------------|
+| **Create Record** (Triggers alerts/AI) | POST `/api/records?userId={{userId}}` | `{"bpSystolic": 120, "bpDiastolic": 80, "sugarLevel": 100.50, "weight": 70.25, "heartRate": 72, "date": "2025-11-12", "notes": "Feeling good"}` | `{"id": 1, "bpSystolic": 120, ...}` (full HealthRecord; alerts auto-generated) | 400: `{"bpSystolic": "BP Systolic is required"}`; 404: Invalid userId. |
+| **Update Record** | PUT `/api/records/{{recordId}}?userId={{userId}}` | `{"bpSystolic": 130, "bpDiastolic": 85, "sugarLevel": 130.00, ...}` | `{"id": 1, "bpSystolic": 130, ...}` (updated) | 404: `{"error": "Record not found: 999"}`; 500: `"Unauthorized"` (wrong userId). |
+| **Delete Record** | DELETE `/api/records/{{recordId}}?userId={{userId}}` | N/A | 204 No Content (empty body) | 404: `{"error": "Record not found: 999"}`; 500: `"Unauthorized"`. |
+| **Get All Records by User** | GET `/api/records/user/{{userId}}` | N/A | `[{"id": 1, "bpSystolic": 120, ...}, {...}]` (list, sorted desc by date) | 200 empty `[]` if no records; 401 unauthorized. |
+| **Get Records by Date** | GET `/api/records/user/{{userId}}/date?date=2025-11-12` | N/A | `[{"id": 1, ...}]` (filtered list) | 200 empty `[]`; 400 invalid date format. |
+| **Export PDF** | GET `/api/records/user/{{userId}}/export/pdf` | N/A | 200 with PDF binary (download "health_records.pdf"; table with Date, BP, Sugar, etc.) | 200 empty PDF if no records; 401 unauthorized. |
+| **Export CSV** | GET `/api/records/user/{{userId}}/export/csv` | N/A | 200 with CSV binary (download "health_records.csv"; e.g., "Date,BP,Sugar,...\n2025-11-12,120/80,100.50,...") | 200 empty CSV if no records. |
+
+**Scenarios**:
+- **Success Flow**: Create record (high sugar >126 → rule alert + AI) → Get all → Update → Export PDF/CSV (verify file opens with data) → Delete → Get all (empty).
+- **Error Flow**: Create without required fields → 400 validation; Update wrong userId → 500 unauthorized; Export non-existent user → 200 empty file.
+- **Edge**: Create with null sugar/weight → Success (optional fields); Date in future/past → Success.
+
+#### 3. Alerts & AI
+| Endpoint | Method & URL | Request Body | Expected Success (200 OK) | Expected Error Examples |
+|----------|--------------|--------------|---------------------------|-------------------------|
+| **Generate Alerts** (Manual; auto on create) | POST `/api/alerts/generate/{{userId}}` | N/A | 200 empty (204 also fine; alerts saved to DB) | 404: Invalid userId; 500: AI failure `"AI service unavailable"`. |
+| **Get Alerts by User** | GET `/api/alerts/user/{{userId}}` | N/A | `[{"id": 1, "message": "High BP detected...", "read": false, ...}, {...}]` (list, desc by createdAt) | 200 empty `[]`; 401 unauthorized. |
+| **Mark Alert as Read** | PUT `/api/alerts/{{alertId}}/read?userId={{userId}}` | N/A | `{"id": 1, "message": "...", "read": true}` | 404: `{"error": "Alert not found: 999"}`; 500: `"Unauthorized"`. |
+| **Get AI Advice** | POST `/api/alerts/advice` | `{"userId": 1, "latestReadings": {"bp": "120/80", "sugar": 100.50, "weight": 70.25, "heart_rate": 72}}` | `"1. Stay hydrated. 2. Light exercise. 3. Consult if persists."` (string; 3 suggestions) | 500: `"AI service unavailable: Invalid key"` (OpenAI error); 400 invalid DTO. |
+
+**Scenarios**:
+- **Success Flow**: Create record (auto alerts) → Get alerts (rule + AI messages) → Mark read → Generate manual (new alerts) → Get AI directly (custom readings).
+- **Error Flow**: Generate for invalid user → 404; Get AI with empty readings → Fallback `"No advice generated..."`; Mark wrong userId → 500 unauthorized.
+- **Edge**: High values (bp>140, sugar>126, hr>100) → Specific alerts; No records → Empty list, no alerts.
+
+#### Additional Testing Notes
+- **Validation Errors**: Always 400 with field-specific messages (e.g., `{"date": "Date is required"}`).
+- **Global Errors**: 404 Not Found, 500 Internal (e.g., DB fail: `{"error": "Internal server error"}`).
+- **Emails**: Register/forgot → OTP in email; Create high record → Alert email (if integrated); Weekly cron → Summary email (test by temp fixedRate=30000).
+- **DB Verification**: Use MySQL Workbench: `SELECT * FROM users/health_records/alerts;` after tests.
+- **Full E2E**: Register (userId=1) → Create record (recordId=1) → Export → Get alerts → AI advice.
+
+This covers all features/scenarios. If you need curl commands or screenshots, let me know! Ready for React frontend?

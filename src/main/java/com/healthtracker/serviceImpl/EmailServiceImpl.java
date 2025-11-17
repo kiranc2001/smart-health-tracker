@@ -10,6 +10,7 @@ import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.text.SimpleDateFormat;
 import java.time.LocalDate;
@@ -46,8 +47,11 @@ public class EmailServiceImpl implements EmailService {
         mailSender.send(mailMessage);
     }
 
+
+   @Scheduled(cron = "0 0 9 * * MON") // Weekly on Monday 9AM
+    //@Scheduled(fixedRate = 30000)
+    @Transactional
     @Override
-    @Scheduled(cron = "0 0 9 * * MON") // Weekly on Monday 9AM
     public void sendWeeklySummary() { // Fixed: No-arg method
         List<User> users = userRepository.findAll(); // Fetch all users
         for (User user : users) {
@@ -63,7 +67,7 @@ public class EmailServiceImpl implements EmailService {
                 StringBuilder body = new StringBuilder("Weekly Health Summary for " + user.getName() + ":\n");
                 SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
                 for (HealthRecord r : weekly) {
-                    body.append("Date: ").append(sdf.format(r.getDate()))
+                    body.append("Date: ").append(r.getDate().toString()).append(", ")
                             .append(", BP: ").append(r.getBpSystolic()).append("/").append(r.getBpDiastolic() != null ? r.getBpDiastolic() : "N/A")
                             .append(", Sugar: ").append(r.getSugarLevel() != null ? r.getSugarLevel() : "N/A")
                             .append(", Weight: ").append(r.getWeight() != null ? r.getWeight() : "N/A")
